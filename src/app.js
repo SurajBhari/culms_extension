@@ -61,18 +61,42 @@
     return svg;
   }
 
-  // Moodle's file icon name -> short label and colour class.
+  // Moodle's file icon name (every one in core's pix/f) -> short label and
+  // colour class. Older themes add a size ("pdf-24"), which is dropped.
+  const PDF = ["PDF", "k-pdf"];
+  const PPT = ["PPT", "k-ppt"];
+  const DOC = ["DOC", "k-doc"];
+  const XLS = ["XLS", "k-xls"];
+  const ZIP = ["ZIP", "k-zip"];
+  const IMG = ["IMG", "k-img"];
+  const VID = ["VID", "k-vid"];
+  const AUD = ["AUD", "k-vid"];
+  const TXT = ["TXT", "k-txt"];
+  const CODE = ["CODE", "k-txt"];
   const FILE_KINDS = {
-    pdf: ["PDF", "k-pdf"],
-    powerpoint: ["PPT", "k-ppt"],
-    document: ["DOC", "k-doc"],
-    spreadsheet: ["XLS", "k-xls"],
-    archive: ["ZIP", "k-zip"],
-    image: ["IMG", "k-img"],
-    mpeg: ["VID", "k-vid"],
-    video: ["VID", "k-vid"],
-    audio: ["AUD", "k-vid"],
-    text: ["TXT", "k-txt"],
+    pdf: PDF,
+    powerpoint: PPT, impress: PPT,
+    document: DOC, writer: DOC, publisher: DOC,
+    spreadsheet: XLS, calc: XLS, chart: XLS, database: ["DB", "k-xls"], base: ["DB", "k-xls"],
+    archive: ZIP,
+    image: IMG, jpeg: IMG, png: IMG, gif: IMG, bmp: IMG, tiff: IMG, eps: IMG, psd: IMG, draw: IMG,
+    video: VID, mpeg: VID, quicktime: VID, avi: VID, wmv: VID, flash: VID,
+    audio: AUD, mp3: AUD, wav: AUD,
+    text: TXT, isf: TXT,
+    sourcecode: CODE, markup: CODE, html: ["HTML", "k-txt"], math: CODE,
+    epub: ["EPUB", "k-doc"],
+    moodle: ["MBZ", "k-zip"],
+  };
+  // By extension, for a file whose icon says "unknown" once its name is known.
+  const EXT_KINDS = {
+    pdf: PDF, ppt: PPT, pptx: PPT, pps: PPT, ppsx: PPT, odp: PPT, key: PPT,
+    doc: DOC, docx: DOC, odt: DOC, rtf: DOC,
+    xls: XLS, xlsx: XLS, csv: XLS, ods: XLS,
+    zip: ZIP, rar: ZIP, "7z": ZIP, gz: ZIP, tar: ZIP,
+    jpg: IMG, jpeg: IMG, png: IMG, gif: IMG, webp: IMG, svg: IMG,
+    mp4: VID, mkv: VID, mov: VID, webm: VID, avi: VID,
+    mp3: AUD, wav: AUD, m4a: AUD, ogg: AUD,
+    txt: TXT, md: TXT,
   };
   const MOD_KINDS = {
     forum: ["forum", "Forum"],
@@ -85,17 +109,40 @@
     lti: ["video", "External tool"],
     hvp: ["video", "Interactive"],
     h5pactivity: ["video", "Interactive"],
+    scorm: ["video", "SCORM package"],
+    imscp: ["book", "Content package"],
     attendance: ["assign", "Attendance"],
     feedback: ["quiz", "Feedback"],
+    questionnaire: ["quiz", "Questionnaire"],
+    survey: ["quiz", "Survey"],
     choice: ["quiz", "Poll"],
     lesson: ["book", "Lesson"],
+    glossary: ["book", "Glossary"],
+    wiki: ["page", "Wiki"],
+    data: ["page", "Database"],
+    workshop: ["assign", "Workshop"],
+    chat: ["forum", "Chat"],
+    bigbluebuttonbn: ["video", "Live class"],
+    zoom: ["video", "Live class"],
+    customcert: ["file", "Certificate"],
   };
   const isFile = (it) => it.modname === "resource";
   const isMaterial = (it) => it.modname === "resource" || it.modname === "folder" || it.modname === "url" || it.modname === "page" || it.modname === "book";
+  // Activities whose text goes into a zip as Markdown.
+  const isText = (it) => it.modname === "page" || it.modname === "book";
+
+  function fileKind(it) {
+    const kind = FILE_KINDS[(it.filetype || "").replace(/-\d+$/, "")];
+    if (kind) return kind;
+    const res = state.resolved.get(it.cmid);
+    const ext = res ? (/\.(\w{1,5})$/.exec(res.filename) || [])[1] : "";
+    if (!ext) return ["FILE", "k-file"];
+    return EXT_KINDS[ext.toLowerCase()] || [ext.toUpperCase(), "k-file"];
+  }
 
   function kindTile(it) {
     if (isFile(it)) {
-      const [label, cls] = FILE_KINDS[it.filetype] || ["FILE", "k-file"];
+      const [label, cls] = fileKind(it);
       return h("span", { class: `cs-tile ${cls}` }, label);
     }
     const [ic] = MOD_KINDS[it.modname] || ["other"];
@@ -103,8 +150,134 @@
   }
 
   function kindLabel(it) {
-    if (isFile(it)) return (FILE_KINDS[it.filetype] || ["File"])[0] === "FILE" ? "File" : FILE_KINDS[it.filetype][0];
+    if (isFile(it)) {
+      const [label] = fileKind(it);
+      return label === "FILE" ? "File" : label;
+    }
     return (MOD_KINDS[it.modname] || [null, it.modname ? it.modname[0].toUpperCase() + it.modname.slice(1) : "Activity"])[1];
+  }
+
+  // ------------------------------------------------------------ assessments
+
+  // Quizzes, assignments and surprise tests. CU runs a surprise test as an
+  // assignment or a quiz, usually in a "Surprise Test" section.
+  function assessKind(it, sec) {
+    if (it.modname !== "quiz" && it.modname !== "assign") return null;
+    if (/surprise/i.test(`${it.name} ${sec ? sec.name : ""}`)) return "surprise";
+    return it.modname;
+  }
+  const ASSESS_KINDS = [
+    ["surprise", "Surprise tests", "surprise test"],
+    ["quiz", "Quizzes", "quiz"],
+    ["assign", "Assignments", "assignment"],
+  ];
+
+  const deadline = (it) => (it.dates || []).find((d) => /^(due|close|cut)/i.test(d.label)) || null;
+  const opening = (it) => (it.dates || []).find((d) => /^open/i.test(d.label)) || null;
+
+  function fmtDay(ms) {
+    return new Date(ms).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
+  // "Due 30 Oct, 11:00 pm" / "Closed 20 Oct, ..." from the course page.
+  function dateLine(it) {
+    const due = deadline(it);
+    if (due) return `${due.label} ${fmtDay(due.time)}`;
+    const open = opening(it);
+    return open ? `${open.label} ${fmtDay(open.time)}` : "";
+  }
+
+  function statusOf(cmid) {
+    if (!state.status.has(cmid)) state.status.set(cmid, store.get(`status:${cmid}`));
+    return state.status.get(cmid);
+  }
+
+  // Where the student stands on a quiz or assignment, as { text, tone }, tone
+  // being done, todo, late or wait. Uses the activity's own page once it has
+  // been read, and the course page's dates and completion until then.
+  function standing(it) {
+    const st = statusOf(it.cmid);
+    const now = Date.now();
+    const due = deadline(it);
+    const open = opening(it);
+    const past = !!due && due.time < now;
+    if (st && st.kind === "assign") {
+      const sub = st.submission.toLowerCase();
+      if (st.grade) return { text: `Graded ${st.grade}`, tone: "done" };
+      if (/submitted/.test(sub) && !/not submitted/.test(sub)) return { text: "Submitted", tone: "done" };
+      if (open && open.time > now) return { text: `Opens ${fmtDay(open.time)}`, tone: "wait" };
+      if (/draft/.test(sub)) return { text: past ? "Draft, past due" : "Draft, not submitted", tone: past ? "late" : "todo" };
+      return past ? { text: "Not submitted", tone: "late" } : { text: "To submit", tone: "todo" };
+    }
+    if (st && st.kind === "quiz") {
+      if (st.inProgress) return { text: "In progress", tone: "todo" };
+      if (st.finished) return { text: st.grade ? `Attempted · ${st.grade}` : "Attempted", tone: "done" };
+      if (open && open.time > now) return { text: `Opens ${fmtDay(open.time)}`, tone: "wait" };
+      return past ? { text: "Missed", tone: "late" } : { text: "Not attempted", tone: "todo" };
+    }
+    if (it.done === true) return { text: "Done", tone: "done" };
+    if (open && open.time > now) return { text: `Opens ${fmtDay(open.time)}`, tone: "wait" };
+    if (it.done === false) return past ? { text: "Missed", tone: "late" } : { text: "To do", tone: "todo" };
+    return null;
+  }
+
+  function paintStatus(el) {
+    const s = standing(el.csItem);
+    el.className = "cs-status" + (s ? ` t-${s.tone}` : "");
+    el.textContent = s ? s.text : "";
+    el.hidden = !s;
+  }
+
+  function statusChip(it) {
+    const el = h("span", { "data-status": it.cmid });
+    el.csItem = it;
+    paintStatus(el);
+    return el;
+  }
+
+  // Read each quiz's and assignment's own page (Moodle's web service for this
+  // is switched off on CULMS), a few at a time, repainting chips as they come.
+  async function loadStatuses(items, force, onEach) {
+    const todo = items.filter((it) => {
+      const st = statusOf(it.cmid);
+      return force || !st || Date.now() - st.at > STALE_MS;
+    });
+    let expired = null;
+    await pool(todo, PARALLEL, async (it) => {
+      if (expired) return;
+      try {
+        const st = { at: Date.now(), ...(await state.lms.status(it)) };
+        state.status.set(it.cmid, st);
+        store.set(`status:${it.cmid}`, st);
+      } catch (err) {
+        if (err instanceof CULMS.SessionExpired) expired = err;
+        return;
+      }
+      for (const el of document.querySelectorAll(`[data-status="${it.cmid}"]`)) paintStatus(el);
+      if (onEach) onEach();
+    });
+    if (expired) throw expired;
+  }
+
+  // Quizzes, assignments and surprise tests in a course tree.
+  function assessments(sections) {
+    const out = [];
+    for (const s of sections || []) {
+      for (const it of s.items || []) {
+        const kind = assessKind(it, s);
+        if (kind) out.push({ it, sec: s, kind });
+      }
+    }
+    return out;
+  }
+
+  function tally(list) {
+    const n = { todo: 0, late: 0 };
+    for (const a of list) {
+      const s = standing(a.it);
+      if (s && (s.tone === "todo" || s.tone === "late")) n[s.tone]++;
+    }
+    return n;
   }
 
   function fmtSize(n) {
@@ -179,6 +352,7 @@
     expanded: new Set(),
     folders: new Map(),
     resolved: new Map(),
+    status: new Map(),
     route: null,
     query: "",
   };
@@ -328,7 +502,7 @@
         "nav",
         { class: "cs-menu" },
         h("a", { href: "/grade/report/overview/index.php" }, "Grades"),
-        h("a", { href: "/calendar/view.php?view=upcoming" }, "Calendar"),
+        h("a", { href: "/calendar/view.php?view=month", onclick: nav }, "Calendar"),
         h("a", { class: "cs-menu-original", href: "#", onclick: toOriginal, title: "Turn the simple view off" }, "Original site"),
         h("a", { href: `/login/logout.php?sesskey=${encodeURIComponent(state.lms.sesskey)}` }, "Log out")
       )
@@ -401,6 +575,7 @@
     if (state.query) return renderSearch();
     if (!route || route.name === "home") return renderHome(token);
     if (route.name === "course") return renderCourse(route, token, prefill);
+    if (route.name === "calendar") return renderCalendar(route, token);
   }
 
   // ------------------------------------------------------------------- home
@@ -450,7 +625,8 @@
     if (!events.length) return;
     box.hidden = false;
     box.replaceChildren(
-      h("h2", { class: "cs-h2" }, icon("clock"), "Due soon"),
+      h("h2", { class: "cs-h2" }, icon("clock"), "Due soon",
+        h("a", { class: "cs-h2-link", href: "/calendar/view.php?view=month", onclick: nav }, "Calendar")),
       h("ul", { class: "cs-list" },
         events.map((e) =>
           h("li", { class: "cs-row" + (e.overdue ? " overdue" : "") },
@@ -478,24 +654,64 @@
     return { files, items, at: c.at };
   }
 
+  // CU enrols a student in two Moodle courses per subject: the class course
+  // (26BAT-604_26MBA-109_ALL: quizzes, live links) and the CONT_ course with
+  // the units. Both are one subject here; the class course leads.
+  function subjects(courses) {
+    const by = new Map();
+    for (const c of courses) {
+      const key = c.code ? CULMS.subjectKey(c.code) : `#${c.id}`;
+      if (!by.has(key)) by.set(key, []);
+      by.get(key).push(c);
+    }
+    return Array.from(by.values(), (list) => {
+      const main = list.find((c) => !c.isCont) || list[0];
+      return { main, list, title: main.title, code: main.code ? CULMS.subjectKey(main.code) : "" };
+    });
+  }
+
+  // The courses of the subject `id` belongs to, content course first.
+  function subjectOf(id, courses) {
+    const s = subjects(courses).find((x) => x.list.some((c) => c.id === id));
+    return s ? [...s.list].sort((a, b) => Number(b.isCont) - Number(a.isCont)) : [];
+  }
+
   function drawCourses(list, courses) {
     if (!courses.length) {
       list.replaceChildren(h("p", { class: "cs-empty" }, "You are not enrolled in any courses."));
       return;
     }
-    const sorted = [...courses].sort((a, b) => a.title.localeCompare(b.title) || Number(a.isCont) - Number(b.isCont));
+    const sorted = subjects(courses).sort((a, b) => a.title.localeCompare(b.title));
     list.replaceChildren(
-      ...sorted.map((c) => {
-        const st = courseStats(c.id);
-        return h("a", { class: "cs-course", href: `/course/view.php?id=${c.id}`, onclick: nav },
-          h("span", { class: "cs-course-title" }, c.title, c.isCont ? h("span", { class: "cs-chip" }, "CONT") : null),
+      ...sorted.map((s) => {
+        const stats = s.list.map((c) => courseStats(c.id)).filter(Boolean);
+        const st = stats.length ? { files: stats.reduce((n, x) => n + x.files, 0), items: stats.reduce((n, x) => n + x.items, 0) } : null;
+        const lone = s.list.length === 1 && s.main.isCont;
+        return h("a", { class: "cs-course", href: `/course/view.php?id=${s.main.id}`, onclick: nav },
+          h("span", { class: "cs-course-title" }, s.title, lone ? h("span", { class: "cs-chip" }, "CONT") : null),
           h("span", { class: "cs-meta" },
-            c.code.replace(/^CONT_/i, ""),
+            s.code,
             st ? ` · ${st.files} file${st.files === 1 ? "" : "s"}, ${st.items} item${st.items === 1 ? "" : "s"}` : ""
           ),
+          assessLine(s.list.flatMap((c) => assessments((store.get(`course:${c.id}`) || {}).sections))),
           icon("chevron", "cs-go")
         );
       })
+    );
+  }
+
+  // "2 quizzes · 3 assignments · 1 surprise test · 2 to do" for a course card.
+  function assessLine(list) {
+    if (!list.length) return null;
+    const parts = ASSESS_KINDS.map(([kind, , one]) => {
+      const n = list.filter((a) => a.kind === kind).length;
+      return n ? `${n} ${one}${n === 1 ? "" : one.endsWith("z") ? "zes" : "s"}` : "";
+    }).filter(Boolean);
+    const n = tally(list);
+    return h("span", { class: "cs-meta cs-assess-line" },
+      parts.join(" · "),
+      n.todo ? h("b", { class: "t-todo" }, ` · ${n.todo} to do`) : null,
+      n.late ? h("b", { class: "t-late" }, ` · ${n.late} missed`) : null
     );
   }
 
@@ -519,6 +735,10 @@
         await fetchCourse(c.id, c, null, () => {});
         status.textContent = `Loading ${++done} / ${courses.length}…`;
       });
+      const items = courses.flatMap((c) => assessments((store.get(`course:${c.id}`) || {}).sections)).map((a) => a.it);
+      let checked = 0;
+      status.textContent = `Checking ${items.length} quizzes and assignments…`;
+      await loadStatuses(items, false, () => (status.textContent = `Checking quizzes and assignments ${++checked} / ${items.length}…`));
       status.textContent = `All ${courses.length} courses up to date`;
       if (state.route && state.route.name === "home" && !state.query) drawCourses(main.querySelector(".cs-courses"), courses);
       else if (state.query) renderSearch();
@@ -529,11 +749,6 @@
   }
 
   // ----------------------------------------------------------------- course
-
-  function courseMeta(id) {
-    const list = (store.get("courses") || {}).list || [];
-    return list.find((c) => c.id === id) || null;
-  }
 
   // Load a course's sections and their activities, calling onSection as each
   // one arrives. Saves the finished tree to the cache.
@@ -580,14 +795,26 @@
 
   async function renderCourse(route, token, prefill) {
     const id = route.id;
-    const meta = courseMeta(id);
+    let list = (store.get("courses") || {}).list;
+    if (!list) {
+      // Opened straight from a link: the course list says which other course
+      // belongs to the same subject. Without it, show this course alone.
+      try {
+        list = await state.lms.courses();
+        store.set("courses", { at: Date.now(), list });
+      } catch {
+        list = [];
+      }
+      if (token !== renderToken) return;
+    }
+    const group = subjectOf(id, list);
+    const meta = group.find((c) => c.id === id) || null;
+    const merged = group.length > 1;
     const cached = store.get(`course:${id}`);
     const t = meta || cached || (prefill && prefill.title) || { title: `Course ${id}`, code: "" };
     document.title = `${t.title} · CULMS`;
 
     const filesOnly = store.pref("filesOnly", false);
-    const body = h("div", { class: "cs-units" });
-    const jump = h("nav", { class: "cs-jump", "aria-label": "Units", hidden: true });
     const status = h("span", { class: "cs-muted" });
     const toggle = h("input", { type: "checkbox", checked: filesOnly || null, onchange: () => {
       store.setPref("filesOnly", toggle.checked);
@@ -595,63 +822,120 @@
     } });
     html.classList.toggle("files-only", filesOnly);
 
-    const refresh = h("button", { class: "cs-btn", onclick: () => load(true) }, icon("refresh"), "Refresh");
+    const assess = h("section", { class: "cs-card cs-assess", hidden: true });
+    // Parts draw from the cache as they are built, before `parts` is complete.
+    let parts = [];
+    const drawAssess = () => token === renderToken && drawAssessments(assess, parts.flatMap((p) => assessments(p.sections())));
+    parts = (group.length ? group : [{ id }]).map((c) => coursePart(c, merged, token, prefill, status, drawAssess));
+    const checkStatuses = async (force) => {
+      const items = parts.flatMap((p) => assessments(p.sections())).map((a) => a.it);
+      try {
+        await loadStatuses(items, force, drawAssess);
+      } catch (err) {
+        if (!failed(err)) toast(`Could not check quizzes and assignments: ${err.message}`);
+      }
+    };
+    const refresh = h("button", { class: "cs-btn", onclick: async () => {
+      refresh.disabled = true;
+      await Promise.all(parts.map((p) => p.load(true)));
+      await checkStatuses(true);
+      refresh.disabled = false;
+    } }, icon("refresh"), "Refresh");
+    const zipAll = h("button", { class: "cs-btn", title: "Download every file in this course as one .zip", onclick: () =>
+      downloadZip(t.title, parts.map((p) => ({ label: merged ? p.label : "", sections: p.sections() })), zipAll)
+    }, icon("download"), "Download all");
     main.replaceChildren(
       h("a", { class: "cs-back", href: "/my/", onclick: nav }, icon("back"), "All courses"),
       h("div", { class: "cs-head" },
         h("div", null,
-          h("h1", null, t.title, t.isCont ? h("span", { class: "cs-chip" }, "CONT") : null),
-          h("div", { class: "cs-meta" }, (t.code || "").replace(/^CONT_/i, ""))
+          h("h1", null, t.title, t.isCont && !merged ? h("span", { class: "cs-chip" }, "CONT") : null),
+          h("div", { class: "cs-meta" }, t.code ? CULMS.subjectKey(t.code) : "")
         ),
         h("div", { class: "cs-actions" },
-          status,
+          merged ? null : status,
           h("label", { class: "cs-switch" }, toggle, "Material only"),
+          zipAll,
           refresh,
           h("a", { class: "cs-btn ghost", href: `/course/view.php?id=${id}#original`, title: "Open this course on the original site" }, icon("external"), "Original")
         )
       ),
+      assess,
+      ...parts.map((p) => p.el)
+    );
+    drawAssess();
+
+    refresh.disabled = true;
+    await Promise.all(parts.filter((p) => p.stale()).map((p) => p.load(false)));
+    refresh.disabled = false;
+    if (token === renderToken) await checkStatuses(false);
+    if (route.section !== null && route.section !== undefined && token === renderToken) {
+      const el = document.getElementById(`cs-sec-${id}-${route.section}`);
+      if (el) el.scrollIntoView({ block: "start" });
+    }
+  }
+
+  // One Moodle course of a subject, with its own unit bar, loaded on its own.
+  // `status` is the page's status line when the course is shown alone.
+  function coursePart(course, merged, token, prefill, status, onDraw) {
+    const id = course.id;
+    const label = course.isCont ? "Content" : "Class";
+    const cached = store.get(`course:${id}`);
+    const body = h("div", { class: "cs-units" });
+    const jump = h("nav", { class: "cs-jump", "aria-label": "Units", hidden: true });
+    const own = merged ? h("span", { class: "cs-muted" }) : status;
+    const el = h("section", { class: "cs-part" },
+      merged
+        ? h("div", { class: "cs-part-head" },
+            h("h2", { class: "cs-h2" }, label),
+            own,
+            h("a", { class: "cs-part-orig", href: `/course/view.php?id=${id}#original`, title: `Open the ${label.toLowerCase()} course on the original site` }, "Original"))
+        : null,
       jump,
       body
     );
 
     let units = null;
+    let current = null;
     const draw = (sections) => {
       if (token !== renderToken) return;
-      if (!units) units = drawUnits(body, sections, jump);
+      current = sections;
+      if (!units) units = drawUnits(body, sections, jump, id);
       else units.update(sections);
+      // Of a subject's two courses, one is often bare: leave it out.
+      if (merged) el.hidden = sections.every((s) => s.items && !s.items.length);
+      onDraw();
     };
 
     if (cached) {
       draw(cached.sections);
-      status.textContent = `Updated ${ago(cached.at)}`;
+      own.textContent = `Updated ${ago(cached.at)}`;
     } else {
-      body.replaceChildren(...skeleton(4));
+      body.replaceChildren(...skeleton(merged ? 2 : 4));
     }
 
     const load = async (force) => {
-      refresh.disabled = true;
-      status.textContent = "Loading…";
+      own.textContent = "Loading…";
       try {
-        await fetchCourse(id, meta, force ? null : prefill, (sections) => {
+        await fetchCourse(id, course.title ? course : null, force ? null : prefill, (sections) => {
           draw(sections);
           const done = sections.filter((s) => s.items).length;
-          if (token === renderToken && done < sections.length) status.textContent = `Loading ${done} / ${sections.length}…`;
+          if (token === renderToken && done < sections.length) own.textContent = `Loading ${done} / ${sections.length}…`;
         });
-        if (token === renderToken) status.textContent = "Up to date";
+        if (token === renderToken) own.textContent = "Up to date";
       } catch (err) {
         if (token !== renderToken) return;
-        status.textContent = "";
+        own.textContent = "";
         if (!failed(err)) toast(`Could not load this course: ${err.message}`);
-      } finally {
-        refresh.disabled = false;
       }
     };
 
-    if (!cached || prefill || Date.now() - cached.at > STALE_MS) await load(false);
-    if (route.section !== null && route.section !== undefined && token === renderToken) {
-      const el = document.getElementById(`cs-sec-${route.section}`);
-      if (el) el.scrollIntoView({ block: "start" });
-    }
+    return {
+      el,
+      label,
+      load,
+      sections: () => current,
+      stale: () => !cached || (prefill && prefill.id === id) || Date.now() - cached.at > STALE_MS,
+    };
   }
 
   // Group sections into units: a level-0 section and the deeper ones after it.
@@ -664,9 +948,10 @@
     return units;
   }
 
-  function drawUnits(body, sections, jump) {
+  function drawUnits(body, sections, jump, courseId) {
     const boxes = new Map();
     let shape = "";
+    const secId = (n) => `cs-sec-${courseId}-${n}`;
     const build = (secs) => {
       boxes.clear();
       shape = secs.map((s) => `${s.number}:${s.level}`).join(",");
@@ -675,22 +960,26 @@
       jump.hidden = units.length < 3;
       jump.replaceChildren(
         ...units.map((u) =>
-          h("a", { href: `#cs-sec-${u.head.number}`, onclick: (e) => {
+          h("a", { href: `#${secId(u.head.number)}`, onclick: (e) => {
             e.preventDefault();
-            document.getElementById(`cs-sec-${u.head.number}`).scrollIntoView({ behavior: "smooth", block: "start" });
+            document.getElementById(secId(u.head.number)).scrollIntoView({ behavior: "smooth", block: "start" });
           } }, u.head.name)
         )
       );
       body.replaceChildren(
         ...units.map((u) => {
-          const card = h("section", { class: "cs-card cs-unit", id: `cs-sec-${u.head.number}` },
-            h("h2", { class: "cs-unit-title" }, u.head.name, h("span", { class: "cs-unit-count" }))
+          const latest = () => [u.head, ...u.chapters].map((s) => boxes.get(s.number).sec);
+          const zip = h("button", { class: "cs-icon-btn cs-unit-zip", title: "Download this unit as a .zip", "aria-label": `Download ${u.head.name}`, onclick: () =>
+            downloadZip(`${document.title.replace(/ · CULMS$/, "")} - ${u.head.name}`, [{ label: "", sections: latest() }], zip)
+          }, icon("download"));
+          const card = h("section", { class: "cs-card cs-unit", id: secId(u.head.number) },
+            h("h2", { class: "cs-unit-title" }, u.head.name, h("span", { class: "cs-unit-side" }, h("span", { class: "cs-unit-count" }), zip))
           );
           const own = h("div", { class: "cs-sec" });
           boxes.set(u.head.number, { box: own, sec: u.head, card });
           card.append(own);
           for (const ch of u.chapters) {
-            const wrap = h("div", { class: "cs-chapter", id: `cs-sec-${ch.number}` }, h("h3", null, ch.name));
+            const wrap = h("div", { class: "cs-chapter", id: secId(ch.number) }, h("h3", null, ch.name));
             const box = h("div", { class: "cs-sec" });
             wrap.append(box);
             card.append(wrap);
@@ -726,6 +1015,7 @@
         const empty = done && secs.every((x) => x.classList.contains("is-empty"));
         const files = Array.from(card.querySelectorAll(".cs-item")).filter((x) => x.dataset.file).length;
         card.querySelector(".cs-unit-count").textContent = files ? `${files} file${files === 1 ? "" : "s"}` : "";
+        card.querySelector(".cs-unit-zip").hidden = !done || !card.querySelector(".cs-item[data-file], .cs-item-wrap");
         let note = card.querySelector(":scope > .cs-empty");
         if (empty && !note) card.append(h("p", { class: "cs-empty" }, "Nothing has been posted here yet."));
         else if (!empty && note) note.remove();
@@ -746,6 +1036,35 @@
     return items.map((it) => itemRow(it));
   }
 
+  // The course's quizzes, assignments and surprise tests in one place, each
+  // with its deadline and where the student stands, soonest deadline first.
+  function drawAssessments(box, list) {
+    box.hidden = !list.length;
+    if (!list.length) return;
+    const n = tally(list);
+    const when = (a) => {
+      const d = deadline(a.it);
+      return d ? d.time : Number.MAX_SAFE_INTEGER;
+    };
+    box.replaceChildren(
+      h("h2", { class: "cs-h2" }, icon("quiz"), "Assessments",
+        h("span", { class: "cs-assess-sum" },
+          n.todo ? h("b", { class: "t-todo" }, `${n.todo} to do`) : null,
+          n.late ? h("b", { class: "t-late" }, `${n.late} missed`) : null
+        )
+      ),
+      ...ASSESS_KINDS.map(([kind, title]) => {
+        const rows = list.filter((a) => a.kind === kind).sort((a, b) => when(a) - when(b));
+        if (!rows.length) return null;
+        return h("div", { class: "cs-assess-group", "data-kind": kind },
+          h("h3", null, title, h("span", { class: "cs-unit-count" }, rows.length)),
+          // The section name, unless it only repeats the kind or the name.
+          rows.map((a) => itemRow(a.it, [kindLabel(a.it), a.it.name].includes(a.sec.name) ? "" : a.sec.name))
+        );
+      })
+    );
+  }
+
   function itemRow(it, context) {
     if (it.modname === "label") {
       return h("div", { class: "cs-label" },
@@ -759,6 +1078,8 @@
     const res = state.resolved.get(it.cmid);
     if (res && res.size) meta.append(` · ${fmtSize(res.size)}`);
     if (context) meta.append(` · ${context}`);
+    const when = dateLine(it);
+    if (when) meta.append(` · ${when}`);
     if (it.restricted) meta.append(h("span", { class: "cs-lock" }, icon("lock"), "restricted"));
 
     const row = h("div", { class: "cs-item" + (isMaterial(it) ? " is-material" : " is-activity"), "data-file": file ? "1" : null },
@@ -768,6 +1089,7 @@
         meta
       )
     );
+    if (it.modname === "quiz" || it.modname === "assign") row.append(statusChip(it));
     if (file) {
       const btn = h("button", { class: "cs-icon-btn", title: "Download", "aria-label": `Download ${it.name}`, onclick: () => download(it, btn, meta) }, icon("download"));
       row.append(btn);
@@ -838,6 +1160,229 @@
     );
   }
 
+  // --------------------------------------------------------------- download
+
+  const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+    for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1;
+    return n >>> 0;
+  });
+
+  function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  // A store-only zip: course files are PDFs and Office documents, already
+  // compressed, so deflating them again gains next to nothing.
+  function zipBlob(entries) {
+    const enc = new TextEncoder();
+    const d = new Date();
+    const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    const local = [];
+    const central = [];
+    let offset = 0;
+    for (const { path, data } of entries) {
+      const name = enc.encode(path);
+      const crc = crc32(data);
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true);
+      lh.setUint16(4, 20, true);
+      lh.setUint16(6, 0x0800, true); // names are UTF-8
+      lh.setUint16(10, time, true);
+      lh.setUint16(12, date, true);
+      lh.setUint32(14, crc, true);
+      lh.setUint32(18, data.length, true);
+      lh.setUint32(22, data.length, true);
+      lh.setUint16(26, name.length, true);
+      local.push(lh, name, data);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true);
+      ch.setUint16(4, 20, true);
+      ch.setUint16(6, 20, true);
+      ch.setUint16(8, 0x0800, true);
+      ch.setUint16(12, time, true);
+      ch.setUint16(14, date, true);
+      ch.setUint32(16, crc, true);
+      ch.setUint32(20, data.length, true);
+      ch.setUint32(24, data.length, true);
+      ch.setUint16(28, name.length, true);
+      ch.setUint32(42, offset, true);
+      central.push(ch, name);
+      offset += 30 + name.length + data.length;
+    }
+    const size = central.reduce((n, x) => n + x.byteLength, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, entries.length, true);
+    end.setUint16(10, entries.length, true);
+    end.setUint32(12, size, true);
+    end.setUint32(16, offset, true);
+    return new Blob([...local, ...central, end], { type: "application/zip" });
+  }
+
+  const safeName = (s) => s.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").replace(/[. ]+$/, "").trim().slice(0, 120) || "untitled";
+
+  // Every file under the given sections (folders included), packed into one
+  // .zip with a directory per unit and chapter, plus an index.md of the whole
+  // tree with its notes and links, so the lot can be handed to an AI as is.
+  // parts: [{ label, sections }], label being "" or "Content" / "Class".
+  async function downloadZip(title, parts, btn) {
+    const jobs = [];
+    const index = [`# ${title}`, ""];
+    for (const p of parts) {
+      if (!p.sections || p.sections.some((s) => !s.items)) return toast("Still loading this course. Try again in a moment.");
+      if (p.label) index.push(`## ${p.label}`, "");
+      for (const u of groupUnits(p.sections)) {
+        for (const s of [u.head, ...u.chapters]) {
+          if (!s.items.length) continue;
+          const dir = [p.label, u.head.name, s === u.head ? "" : s.name].filter(Boolean).map(safeName).join("/");
+          index.push(`${s === u.head ? "###" : "####"} ${s.name}`, "");
+          for (const it of s.items) {
+            if (it.modname === "label") {
+              index.push(it.name, ...(it.links || []).map((l) => `- [${l.name}](${l.url})`), "");
+              continue;
+            }
+            const where = isFile(it) || it.modname === "folder" || isText(it) ? ` → ${dir}/` : "";
+            const st = assessKind(it, s) ? standing(it) : null;
+            const facts = [dateLine(it), st && st.text].filter(Boolean).join(", ");
+            index.push(`- ${kindLabel(it)}: [${it.name}](${it.url})${facts ? ` (${facts})` : ""}${where}`);
+            if (isFile(it) || it.modname === "folder" || isText(it)) jobs.push({ dir, it });
+          }
+          index.push("");
+        }
+      }
+    }
+    if (!jobs.length) return toast("There are no files here to download.");
+
+    btn.disabled = true;
+    btn.classList.add("busy");
+    const entries = [];
+    const taken = new Set();
+    const add = (path, data) => {
+      let p = path;
+      for (let n = 2; taken.has(p.toLowerCase()); n++) p = path.replace(/(\.[^./]*)?$/, ` (${n})$1`);
+      taken.add(p.toLowerCase());
+      entries.push({ path: p, data });
+    };
+    const missed = [];
+    let done = 0;
+    toast(`Downloading 0 / ${jobs.length} items…`);
+    try {
+      await pool(jobs, PARALLEL, async ({ dir, it }) => {
+        try {
+          if (isText(it)) {
+            add(`${dir}/${safeName(it.name)}.md`, new TextEncoder().encode(`# ${it.name}\n\n${await state.lms.content(it)}`));
+          } else if (isFile(it)) {
+            const f = state.resolved.get(it.cmid) || (await state.lms.resolveFile(it.cmid));
+            state.resolved.set(it.cmid, f);
+            add(`${dir}/${safeName(f.filename)}`, await state.lms.bytes(f.url));
+          } else {
+            const files = state.folders.get(it.cmid) || (await state.lms.folder(it.cmid));
+            state.folders.set(it.cmid, files);
+            for (const f of files) add(`${dir}/${safeName(it.name)}/${safeName(f.name)}`, await state.lms.bytes(f.url));
+          }
+        } catch (err) {
+          if (err instanceof CULMS.SessionExpired) throw err;
+          missed.push(it.name);
+        }
+        toast(`Downloading ${++done} / ${jobs.length} items…`);
+      });
+      if (missed.length) index.push("## Not downloaded", "", ...missed.map((m) => `- ${m}`), "");
+      add("index.md", new TextEncoder().encode(index.join("\n")));
+      const url = URL.createObjectURL(zipBlob(entries));
+      const a = h("a", { href: url, download: `${safeName(title)}.zip`, hidden: true });
+      root.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      toast(`Saved ${entries.length - 1} files${missed.length ? `; ${missed.length} could not be fetched (listed in index.md)` : ""}.`);
+    } catch (err) {
+      if (!failed(err)) toast(`Could not download: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("busy");
+    }
+  }
+
+  // --------------------------------------------------------------- calendar
+
+  const monthHref = (year, month) =>
+    `/calendar/view.php?view=month&time=${Math.floor(new Date(year, month - 1, 1).getTime() / 1000)}`;
+
+  async function renderCalendar(route, token) {
+    const at = route.time ? new Date(route.time * 1000) : new Date();
+    const year = at.getFullYear();
+    const month = at.getMonth() + 1;
+    const title = at.toLocaleString("en-IN", { month: "long", year: "numeric" });
+    document.title = `${title} · Calendar · CULMS`;
+    const grid = h("div", { class: "cs-cal" }, skeleton(1));
+    const agenda = h("section", { class: "cs-card cs-agenda", hidden: true });
+    main.replaceChildren(
+      h("a", { class: "cs-back", href: "/my/", onclick: nav }, icon("back"), "All courses"),
+      h("div", { class: "cs-head" },
+        h("h1", null, title),
+        h("div", { class: "cs-actions" },
+          h("a", { class: "cs-btn", href: monthHref(year, month - 1), onclick: nav, title: "Previous month", "aria-label": "Previous month" }, icon("back")),
+          h("a", { class: "cs-btn", href: "/calendar/view.php?view=month", onclick: nav }, "Today"),
+          h("a", { class: "cs-btn", href: monthHref(year, month + 1), onclick: nav, title: "Next month", "aria-label": "Next month" }, icon("chevron")),
+          h("a", { class: "cs-btn ghost", href: `${monthHref(year, month)}#original`, title: "Open the calendar on the original site" }, icon("external"), "Original")
+        )
+      ),
+      grid,
+      agenda
+    );
+    try {
+      const m = await state.lms.month(year, month);
+      if (token === renderToken) drawMonth(grid, agenda, m);
+    } catch (err) {
+      if (!failed(err) && token === renderToken) grid.replaceChildren(h("p", { class: "cs-empty" }, `Could not load the calendar: ${err.message}`));
+    }
+  }
+
+  function drawMonth(grid, agenda, m) {
+    const now = Date.now();
+    const toDay = (e) => {
+      e.preventDefault();
+      document.getElementById(e.currentTarget.getAttribute("href").slice(1)).scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    const pad = (n) => Array.from({ length: n }, () => h("div", { class: "cs-day pad" }));
+    const cells = m.weeks.flatMap((w) => [
+      ...pad(w.pre),
+      ...w.days.map((d) => {
+        const anchor = `#cs-day-${d.mday}`;
+        const cls = ["cs-day", d.today && "today", d.weekend && "weekend", d.time + 86400000 <= now && "past"].filter(Boolean).join(" ");
+        return h("div", { class: cls },
+          d.events.length ? h("a", { class: "cs-mday", href: anchor, onclick: toDay }, d.mday) : h("span", { class: "cs-mday" }, d.mday),
+          d.events.slice(0, 3).map((e) => h("a", { class: `cs-ev t-${e.type}`, href: e.url, title: [e.name, e.course].filter(Boolean).join(" · ") }, e.name)),
+          d.events.length > 3 ? h("a", { class: "cs-more", href: anchor, onclick: toDay }, `+${d.events.length - 3} more`) : null
+        );
+      }),
+      ...pad(w.post),
+    ]);
+    grid.replaceChildren(...m.daynames.map((n) => h("div", { class: "cs-dow" }, n)), ...cells);
+
+    const days = m.weeks.flatMap((w) => w.days).filter((d) => d.events.length);
+    agenda.hidden = false;
+    agenda.replaceChildren(
+      h("h2", { class: "cs-h2" }, icon("clock"), "This month"),
+      days.length
+        ? h("ul", { class: "cs-list" },
+            days.flatMap((d) =>
+              d.events.map((e, i) =>
+                h("li", { class: "cs-row" + (e.time < now ? " past" : ""), id: i === 0 ? `cs-day-${d.mday}` : null },
+                  h("span", { class: "cs-date" }, fmtWhen(e.time)),
+                  h("a", { class: "cs-name", href: e.url }, e.name),
+                  h("span", { class: "cs-meta" }, [e.what, e.course].filter(Boolean).join(" · "))
+                )
+              )
+            )
+          )
+        : h("p", { class: "cs-empty" }, "Nothing on the calendar this month.")
+    );
+  }
+
   // ----------------------------------------------------------------- search
 
   function onSearch() {
@@ -852,16 +1397,18 @@
     const courses = ((store.get("courses") || {}).list || []);
     const results = [];
     let indexed = 0;
+    for (const sub of subjects(courses)) {
+      if (terms.every((t) => `${sub.title} ${sub.code}`.toLowerCase().includes(t))) results.push({ course: sub.main });
+    }
     for (const c of courses) {
       const tree = store.get(`course:${c.id}`);
-      const courseHit = terms.every((t) => `${c.title} ${c.code}`.toLowerCase().includes(t));
-      if (courseHit) results.push({ course: c });
       if (!tree) continue;
       indexed++;
       for (const s of tree.sections) {
         for (const it of s.items || []) {
           if (it.modname === "label") continue;
-          const hay = `${it.name} ${s.name} ${c.title} ${kindLabel(it)}`.toLowerCase();
+          const kind = ASSESS_KINDS.find(([k]) => k === assessKind(it, s));
+          const hay = `${it.name} ${s.name} ${c.title} ${kindLabel(it)} ${kind ? kind[2] : ""}`.toLowerCase();
           if (terms.every((t) => hay.includes(t))) results.push({ course: c, section: s, item: it });
         }
       }

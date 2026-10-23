@@ -23,11 +23,26 @@ session key, your name, the course's list of sections), clears the Moodle page,
 and draws its own in its place.
 
 - **Dashboard** (`/my/`, `/my/courses.php`, `/`): what is due in the next 30
-  days, with overdue work in red, then every course you are enrolled in.
-  `CONT_` content courses are tagged **CONT**, as the connector does.
+  days, with overdue work in red, then every subject you are enrolled in. CU
+  puts each subject in two Moodle courses, the class course
+  (`26BAT-604_26MBA-109_ALL`) and the `CONT_26BAT-604` content course. They
+  show up as one card, and the course page shows both: **Content** first,
+  then **Class**. A course whose part is empty leaves that part out.
+  Each card also counts the subject's surprise tests, quizzes and
+  assignments, with how many are still to do or were missed.
 - **Course** (`/course/view.php?id=…`): every unit with its chapters on one
   page, instead of one tab at a time. Chips at the top jump to a unit, and each
   unit shows how many files it has. Empty chapters are hidden.
+  - **Assessments** at the top gathers the subject's surprise tests, quizzes
+    and assignments, soonest deadline first. Each one shows its dates and where
+    you stand (Submitted, Graded 8/10, Attempted, Not attempted, Opens …,
+    Not submitted, Missed). Moodle's web service for this is switched off on
+    CULMS, so the status is read from each activity's own page, a few at a
+    time, and cached for an hour. A surprise test is any quiz or assignment
+    named "surprise" or in a "Surprise Test" section.
+  - **Files** of every kind Moodle knows (PDF, Office, OpenDocument, images,
+    video, audio, archives, code) get a labelled tile; a file Moodle shows
+    embedded or behind a "click to open" page still downloads as the file.
   - **Files** open in a new tab. The download button goes past CU's Office
     viewer to the original `.pptx`/`.docx` and shows the file size.
   - **Folders** open in place to list their files.
@@ -35,6 +50,17 @@ and draws its own in its place.
     their Moodle page. Restricted items carry a lock.
   - **Material only** hides forums, quizzes and assignments, leaving files,
     folders, links and pages.
+  - **Download all** packs every file in the course (both parts, folders
+    included) into one `.zip`, with a directory per unit and chapter. Pages
+    (CU's topic notes) and books go in as Markdown text, with their YouTube
+    lectures as links. Each
+    unit has its own download button too. The zip also holds an `index.md`
+    listing the whole tree with its notes and links, which makes it easy to
+    give the material to an AI tool as context.
+- **Calendar** (`/calendar/view.php`): a month grid with every event (quizzes
+  opening and closing, assignments due), a list of the month's events under it,
+  and arrows to move between months. On a phone the grid shows dots and the
+  list holds the details.
 - **Search** (press `/`) covers every course you have opened. **Refresh all**
   on the dashboard loads all of them, so search covers everything.
 - Every other page (a quiz, a forum thread, grades) stays as Moodle draws it,

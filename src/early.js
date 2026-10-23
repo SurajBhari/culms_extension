@@ -30,6 +30,10 @@
         return { name: "course", id, section: section === null ? null : Number(section) };
       }
     }
+    if (path === "/calendar/view.php") {
+      const time = Number(new URLSearchParams(loc.search).get("time"));
+      return { name: "calendar", time: time > 0 ? time : null };
+    }
     return null;
   };
 

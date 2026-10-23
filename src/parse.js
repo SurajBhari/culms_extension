@@ -11,6 +11,8 @@
   const FILE_ICON = /\/f\/([\w-]+)/;
   const NBSP_INDENT = /^[ \s]*/;
 
+  const GRADE = /(\d+(?:\.\d+)?)\s*(?:\/|out of)\s*(\d+(?:\.\d+)?)/i;
+
   const squash = (s) => (s || "").replace(/\s+/g, " ").trim();
 
   const toDoc = (html) => new DOMParser().parseFromString(html, "text/html");
@@ -100,6 +102,37 @@
     return card ? squash(card.dataset.activityname) : "";
   }
 
+  // "Saturday, 12 September 2026, 11:47 AM" -> ms, or null.
+  function moodleDate(text) {
+    const parts = squash(text).split(", ");
+    const t = Date.parse((parts.length > 2 ? parts.slice(1) : parts).join(" "));
+    return Number.isNaN(t) ? null : t;
+  }
+
+  // The "Opened: ... / Due: ..." lines under a quiz or assignment.
+  function activityDates(li) {
+    const out = [];
+    for (const row of li.querySelectorAll('[data-region="activity-dates"] > div')) {
+      const strong = row.querySelector("strong");
+      if (!strong) continue;
+      const label = squash(strong.textContent).replace(/:$/, "");
+      const time = moodleDate(row.textContent.replace(strong.textContent, ""));
+      if (label && time) out.push({ label, time });
+    }
+    return out;
+  }
+
+  // Completion as the course page shows it: true (Done), false (To do), or
+  // null when the activity does not track completion.
+  function activityDone(li) {
+    const manual = li.querySelector('[data-action="toggle-manual-completion"]');
+    if (manual) return /undo/.test(manual.dataset.toggletype || "");
+    const auto = li.querySelector('[data-region="completionrequirements"] .dropdown-toggle, [data-region="completion-info"] .dropdown-toggle');
+    if (!auto) return null;
+    const t = squash(auto.textContent).toLowerCase();
+    return t === "done" ? true : t === "to do" ? false : null;
+  }
+
   // Activities of one section. When the page carries the section's own <li>
   // only its activities count, so a format that also renders neighbouring
   // sections does not leak them in.
@@ -148,6 +181,8 @@
         url: a ? a.href : "",
         filetype: ft ? ft[1] : "",
         restricted: !!li.querySelector(".availabilityinfo, .isrestricted"),
+        dates: activityDates(li),
+        done: activityDone(li),
       });
     }
     return out;
@@ -155,9 +190,102 @@
 
   // CU's Office viewer (local/officeviewer) keeps the real pluginfile URL only
   // on its "Download original file" button; the iframe is a converted PDF.
+  // A file Moodle shows embedded (video, image) or behind a "click to open"
+  // page has its pluginfile URL on the player or the link instead.
   function viewerDownloadUrl(doc) {
     const a = doc.querySelector("a[href][download]");
-    return a ? a.href : null;
+    if (a) return a.href;
+    const main = doc.querySelector('[role="main"]') || doc;
+    const link = main.querySelector('a[href*="/pluginfile.php/"]');
+    if (link) return link.href;
+    const media = main.querySelector('video source[src*="/pluginfile.php/"], audio source[src*="/pluginfile.php/"], video[src*="/pluginfile.php/"], img[src*="/pluginfile.php/"], object[data*="/pluginfile.php/"], embed[src*="/pluginfile.php/"]');
+    if (!media) return null;
+    return new URL(media.getAttribute("src") || media.getAttribute("data"), location.href).href;
+  }
+
+  // An assignment's own page: "Submission status", "Grading status" and the
+  // grade, read off its status and feedback tables.
+  function assignStatus(doc) {
+    const rows = {};
+    for (const tr of doc.querySelectorAll('[role="main"] table tr')) {
+      const th = tr.querySelector("th");
+      const td = tr.querySelector("td");
+      if (th && td) rows[squash(th.textContent).toLowerCase()] = squash(td.textContent);
+    }
+    const grade = GRADE.exec(rows.grade || "");
+    return {
+      kind: "assign",
+      submission: rows["submission status"] || "",
+      grading: rows["grading status"] || "",
+      grade: grade ? `${Number(grade[1])}/${Number(grade[2])}` : "",
+    };
+  }
+
+  // A quiz's own page: the attempts so far (CU's theme draws them as cards,
+  // stock Moodle as a table) and the grade once it is released.
+  function quizStatus(doc) {
+    const main = doc.querySelector('[role="main"]') || doc;
+    const states = [];
+    for (const box of main.querySelectorAll(".moove-infobox")) {
+      const title = box.querySelector(".moove-infobox-title");
+      if (title && /^(status|state)$/i.test(squash(title.textContent))) {
+        states.push(squash(box.textContent.replace(title.textContent, "")));
+      }
+    }
+    if (!states.length) {
+      for (const table of main.querySelectorAll("table.quizattemptsummary")) {
+        const head = Array.from(table.querySelectorAll("thead th"), (th) => squash(th.textContent).toLowerCase());
+        const col = head.findIndex((x) => x === "status" || x === "state");
+        if (col < 0) continue;
+        for (const tr of table.querySelectorAll("tbody tr")) {
+          const cell = tr.children[col];
+          if (cell) states.push(squash(cell.textContent));
+        }
+      }
+    }
+    const feedback = main.querySelector("#feedback");
+    const grade = feedback ? GRADE.exec(feedback.textContent) : null;
+    return {
+      kind: "quiz",
+      attempts: states.length,
+      finished: states.filter((x) => /finished|submitted/i.test(x)).length,
+      inProgress: states.some((x) => /in progress/i.test(x)),
+      grade: grade ? `${Number(grade[1])}/${Number(grade[2])}` : "",
+    };
+  }
+
+  // The readable body of a Page activity or a book's print view, as Markdown,
+  // so it can go into a zip next to the files. Embedded videos become links.
+  function contentMarkdown(doc) {
+    const root =
+      doc.querySelector('[role="main"] .box.generalbox') ||
+      doc.querySelector('[role="main"]') ||
+      doc.body;
+    const walk = (node) => {
+      if (node.nodeType === 3) return node.textContent.replace(/\s+/g, " ");
+      if (node.nodeType !== 1) return "";
+      const tag = node.tagName.toLowerCase();
+      if (/^(script|style|noscript|button|form|nav)$/.test(tag)) return "";
+      const inner = () => Array.from(node.childNodes, walk).join("");
+      if (/^h[1-6]$/.test(tag)) return `\n\n${"#".repeat(Number(tag[1]))} ${squash(inner())}\n\n`;
+      if (tag === "br") return "\n";
+      if (tag === "li") return `\n- ${squash(inner())}`;
+      if (tag === "a") {
+        const text = squash(inner());
+        const href = node.href || "";
+        return /^https?:/.test(href) && text && text !== href ? `[${text}](${href})` : text || href;
+      }
+      if (tag === "iframe" || tag === "video" || tag === "embed") {
+        const src = node.getAttribute("src") || (node.querySelector("source") || {}).src || "";
+        const yt = /youtube(?:-nocookie)?\.com\/embed\/([\w-]+)/.exec(src);
+        return src ? `\n\nVideo: ${yt ? `https://www.youtube.com/watch?v=${yt[1]}` : src}\n\n` : "";
+      }
+      if (tag === "img") return node.alt ? `[image: ${squash(node.alt)}]` : "";
+      if (tag === "tr") return `\n| ${Array.from(node.children, (c) => squash(walk(c))).join(" | ")} |`;
+      if (/^(p|div|section|article|table|ul|ol|blockquote|pre|figure)$/.test(tag)) return `\n\n${inner()}\n\n`;
+      return inner();
+    };
+    return walk(root).replace(/[ \t]+\n/g, "\n").replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   }
 
   // Files inside a Folder activity.
@@ -178,5 +306,5 @@
     return /\/login\/(index\.php)?/.test(new URL(url, location.href).pathname);
   }
 
-  CULMS.parse = { toDoc, config, userName, sections, activities, viewerDownloadUrl, folderFiles, isLoginPage, squash };
+  CULMS.parse = { toDoc, config, userName, sections, activities, viewerDownloadUrl, folderFiles, isLoginPage, squash, assignStatus, quizStatus, contentMarkdown, moodleDate };
 })();

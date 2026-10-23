@@ -75,6 +75,43 @@
       }));
     }
 
+    // One month as Moodle's calendar draws it: weeks of days, each with its
+    // events, padded to whole weeks.
+    async month(year, month) {
+      const data = await this.ajax("core_calendar_get_calendar_monthly_view", {
+        year,
+        month,
+        courseid: 1,
+        categoryid: 0,
+        includenavigation: false,
+        mini: false,
+        day: 1,
+      });
+      return {
+        name: data.periodname || "",
+        daynames: (data.daynames || []).map((d) => d.shortname),
+        weeks: (data.weeks || []).map((w) => ({
+          pre: (w.prepadding || []).length,
+          post: (w.postpadding || []).length,
+          days: w.days.map((d) => ({
+            mday: d.mday,
+            time: d.timestamp * 1000,
+            today: !!d.istoday,
+            weekend: !!d.isweekend,
+            events: (d.events || []).map((e) => ({
+              id: e.id,
+              name: e.name,
+              what: e.activitystr || e.normalisedeventtypetext || "",
+              type: e.eventtype || "",
+              course: e.course ? cleanName(e.course.fullname).title : "",
+              url: e.url || e.viewurl || "",
+              time: e.timestart * 1000,
+            })),
+          })),
+        })),
+      };
+    }
+
     async courseHtml(courseId, section) {
       const q = section === undefined || section === null ? "" : `&section=${section}`;
       return page(`/course/view.php?id=${courseId}${q}`, `loading course ${courseId}`);
@@ -83,6 +120,25 @@
     async folder(cmid) {
       const { doc } = await page(`/mod/folder/view.php?id=${cmid}`, `opening folder ${cmid}`);
       return P.folderFiles(doc);
+    }
+
+    // Where a quiz or assignment stands for this student, read off its page.
+    async status(it) {
+      const { doc } = await page(`/mod/${it.modname}/view.php?id=${it.cmid}`, `opening ${it.name}`);
+      return it.modname === "quiz" ? P.quizStatus(doc) : P.assignStatus(doc);
+    }
+
+    // A Page's text, or a whole Book through its print view, as Markdown.
+    async content(it) {
+      const url = it.modname === "book" ? `/mod/book/tool/print/index.php?id=${it.cmid}` : `/mod/${it.modname}/view.php?id=${it.cmid}`;
+      const { doc } = await page(url, `opening ${it.name}`);
+      return P.contentMarkdown(doc);
+    }
+
+    async bytes(url) {
+      const r = await fetch(url, { credentials: "same-origin" });
+      check(r, "downloading a file");
+      return new Uint8Array(await r.arrayBuffer());
     }
 
     // Follow a File activity to the real file without downloading it: a
@@ -125,6 +181,12 @@
     return { title: fullname.slice(i + 4).trim(), code, isCont: code.toUpperCase().startsWith("CONT_") };
   }
 
+  // The subject a course belongs to: "26BAT-604_26MBA-109_ALL" (the class) and
+  // "CONT_26BAT-604" (CU's content course) are both "26BAT-604".
+  function subjectKey(code) {
+    return code.replace(/^CONT_/i, "").split("_")[0].toUpperCase();
+  }
+
   function withParam(url, key, value) {
     const u = new URL(url, location.href);
     u.searchParams.set(key, value);
@@ -134,5 +196,6 @@
   CULMS.Lms = Lms;
   CULMS.SessionExpired = SessionExpired;
   CULMS.cleanName = cleanName;
+  CULMS.subjectKey = subjectKey;
   CULMS.withParam = withParam;
 })();

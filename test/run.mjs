@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:https";
+import { crc32 } from "node:zlib";
 import { respond, log } from "./mock.mjs";
 
 const EXT = fileURLToPath(new URL("..", import.meta.url));
@@ -85,6 +86,25 @@ page.on("pageerror", (e) => {
   if (/content|CULMS|cs-/.test(e.stack || "")) errors.push(String(e));
 });
 
+// Names and contents of a zip, read from its central directory.
+function unzip(buf) {
+  const end = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const count = buf.readUInt16LE(end + 10);
+  let p = buf.readUInt32LE(end + 16);
+  const out = {};
+  for (let i = 0; i < count; i++) {
+    const size = buf.readUInt32LE(p + 24);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.subarray(p + 46, p + 46 + nameLen).toString();
+    const start = local + 30 + buf.readUInt16LE(local + 26);
+    out[name] = buf.subarray(start, start + size);
+    if (crc32(out[name]) !== buf.readUInt32LE(p + 16)) throw new Error(`bad CRC for ${name} in the zip`);
+    p += 46 + nameLen;
+  }
+  return out;
+}
+
 const shot = (name) => page.screenshot({ path: join(OUT, `${name}.png`), fullPage: true });
 
 try {
@@ -92,7 +112,7 @@ try {
     await page.goto("https://lms.cuchd.in/my/");
     await page.waitForSelector("#culms-simple .cs-course", { timeout: 15000 });
     const n = await page.locator(".cs-course").count();
-    assert(n === 5, `expected 5 courses, got ${n}`);
+    assert(n === 4, `expected 4 subjects (CONT merged in), got ${n}`);
     const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
     assert(bg !== "rgb(255, 0, 0)", "Moodle's stylesheet is still applied");
     const extraBody = await page.evaluate(() => [...document.body.children].filter((c) => c.id !== "culms-simple").length);
@@ -109,11 +129,48 @@ try {
     await shot("1-dashboard");
   });
 
+  await check("a subject's class and CONT courses open as one page", async () => {
+    await page.click('.cs-course:has-text("DECISION SCIENCE")');
+    await page.waitForURL(/course\/view\.php\?id=125900$/);
+    await page.waitForFunction(() => {
+      const s = [...document.querySelectorAll(".cs-part-head .cs-muted")];
+      return s.length === 2 && s.every((x) => x.textContent === "Up to date");
+    }, null, { timeout: 15000 });
+    const heads = await page.locator(".cs-part-head h2").allTextContents();
+    assert(heads.join("|") === "Content|Class", `parts: ${heads}`);
+    const cls = await page.locator(".cs-part").nth(1).locator(".cs-unit-title").evaluateAll((els) => els.map((e) => e.firstChild.textContent));
+    assert(cls.join("|") === "Live Session Links|Quiz|Unit-1|Surprise Test", `class units: ${cls}`);
+    assert((await page.locator("h1 .cs-chip").count()) === 0, "no CONT chip on a merged subject");
+  });
+
+  await check("quizzes, assignments and surprise tests show where you stand", async () => {
+    const card = page.locator(".cs-assess");
+    await card.waitFor();
+    const groups = await card.locator(".cs-assess-group").evaluateAll((els) => els.map((e) => e.dataset.kind));
+    assert(groups.join("|") === "surprise|quiz|assign", `groups: ${groups}`);
+    const chip = (name) => card.locator(`.cs-item:has-text("${name}") .cs-status`);
+    await page.waitForFunction(() => /Attempted/.test(document.querySelector('.cs-assess [data-status="9000002"]')?.textContent || ""), null, { timeout: 10000 });
+    const want = { "Quiz 1": "Attempted · 8/10", "Assignment 1": "Submitted", "Assignment 2": "Not submitted", "Surprise Test": "To submit" };
+    for (const [name, text] of Object.entries(want)) {
+      const got = await chip(name).textContent();
+      assert(got === text, `${name}: "${got}", expected "${text}"`);
+    }
+    assert(/^Opens /.test(await chip("Quiz 2").textContent()), "a quiz that has not opened yet says when it opens");
+    assert(/t-late/.test(await chip("Assignment 2").getAttribute("class")), "missed assignment not flagged");
+    assert(/Due \d+ \w+/.test(await card.locator('.cs-item:has-text("Assignment 1") .cs-meta').textContent()), "due date missing");
+    const sum = await card.locator(".cs-assess-sum").textContent();
+    assert(sum === "2 to do1 missed", `summary: ${sum}`);
+    const order = await card.locator('[data-kind="assign"] .cs-name').allTextContents();
+    assert(order.join("|") === "Assignment 2|Assignment 1", `assignments not by deadline: ${order}`);
+    assert((await page.locator('.cs-units [data-status="9000004"]').textContent()) === "Submitted", "unit list lacks the status");
+    await page.check(".cs-switch input");
+    assert(await card.locator('.cs-item:has-text("Quiz 1")').isVisible(), "'Material only' should not hide assessments");
+    await page.uncheck(".cs-switch input");
+    await card.screenshot({ path: join(OUT, "2-assessments.png") });
+  });
+
   await check("opening a course lists units, chapters and files", async () => {
-    await page.click('.cs-course:has-text("DECISION SCIENCE"):has(.cs-chip)');
-    await page.waitForURL(/course\/view\.php\?id=125833$/);
-    await page.waitForFunction(() => document.querySelector(".cs-muted")?.textContent === "Up to date", null, { timeout: 15000 });
-    const units = await page.locator(".cs-unit-title").evaluateAll((els) => els.map((e) => e.firstChild.textContent));
+    const units = await page.locator(".cs-part").first().locator(".cs-unit-title").evaluateAll((els) => els.map((e) => e.firstChild.textContent));
     assert(JSON.stringify(units) === JSON.stringify(["Course Overview", "Unit-1", "Unit-2", "Unit-3"]), `units: ${units}`);
     const chapters = await page.locator(".cs-chapter:visible h3").allTextContents();
     assert(chapters.includes("Chapter 1.1") && chapters.includes("Chapter 3.3"), `chapters: ${chapters}`);
@@ -126,12 +183,12 @@ try {
   });
 
   await check("unit chips jump to a unit; units count their files", async () => {
-    const chips = await page.locator(".cs-jump a").allTextContents();
+    const chips = await page.locator(".cs-part").first().locator(".cs-jump a").allTextContents();
     assert(chips.join("|") === "Course Overview|Unit-1|Unit-2|Unit-3", `chips: ${chips}`);
-    assert((await page.textContent("#cs-sec-1 .cs-unit-count")) === "5 files", "Unit-1 file count");
+    assert((await page.textContent("#cs-sec-125833-1 .cs-unit-count")) === "5 files", "Unit-1 file count");
     await page.click('.cs-jump a:has-text("Unit-3")');
     await page.waitForFunction(() => {
-      const r = document.getElementById("cs-sec-9").getBoundingClientRect();
+      const r = document.getElementById("cs-sec-125833-9").getBoundingClientRect();
       const bar = document.querySelector(".cs-jump").getBoundingClientRect();
       return Math.abs(r.top - (bar.bottom + 16)) < 30;
     }, null, { timeout: 5000 });
@@ -162,13 +219,13 @@ try {
     assert(await page.locator('.cs-label:has-text("Read chapter 4")').isVisible(), "label text missing");
     const url = await page.locator('.cs-item:has-text("NPTEL") a.cs-name').getAttribute("href");
     assert(/redirect=1/.test(url), "URL activity should go straight to the link");
-    assert(await page.locator('.cs-item:has-text("Chapter quiz") .cs-lock').isVisible(), "restriction not shown");
-    await page.locator("#cs-sec-3").screenshot({ path: join(OUT, "3-chapter.png") });
+    assert(await page.locator('.cs-units .cs-item:has-text("Chapter quiz") .cs-lock').isVisible(), "restriction not shown");
+    await page.locator("#cs-sec-125833-3").screenshot({ path: join(OUT, "3-chapter.png") });
   });
 
   await check("'Material only' hides forums and quizzes", async () => {
     await page.check(".cs-switch input");
-    assert(!(await page.locator('.cs-item:has-text("Chapter quiz")').isVisible()), "quiz still visible");
+    assert(!(await page.locator('.cs-units .cs-item:has-text("Chapter quiz")').isVisible()), "quiz still visible");
     assert(await page.locator('.cs-item:has-text("E-BOOK")').first().isVisible(), "files hidden too");
     await page.uncheck(".cs-switch input");
   });
@@ -191,7 +248,7 @@ try {
   await check("a reload on a course page renders it straight away", async () => {
     await page.reload();
     await page.waitForSelector(".cs-unit-title");
-    assert((await page.locator(".cs-unit-title").count()) === 4, "units missing after reload");
+    assert((await page.locator(".cs-unit-title").count()) === 8, "units missing after reload");
   });
 
   await check("back button returns to the course list", async () => {
@@ -202,7 +259,10 @@ try {
     await page.waitForSelector(".cs-unit-title");
     await page.goto("https://lms.cuchd.in/my/");
     await page.waitForSelector(".cs-course");
-    const meta = await page.locator('.cs-course:has(.cs-chip) .cs-meta').first().textContent();
+    const meta = await page.locator('.cs-course:has-text("DECISION SCIENCE") .cs-meta').first().textContent();
+    assert(/^26BAT-604 · /.test(meta), `subject code: ${meta}`);
+    const line = await page.locator('.cs-course:has-text("DECISION SCIENCE") .cs-assess-line').textContent();
+    assert(line === "1 surprise test · 3 quizzes · 2 assignments · 2 to do · 1 missed", `course card: ${line}`);
     assert(/files?, \d+ items?/.test(meta), `course card lacks counts: ${meta}`);
   });
 
@@ -212,6 +272,56 @@ try {
     const units = await page.locator(".cs-unit-title").evaluateAll((els) => els.map((e) => e.firstChild.textContent));
     assert(units.join("|") === "General|Week 1 — The marketing mix", `units: ${units}`);
     assert(await page.locator('.cs-item:has-text("Pricing worksheet") .k-xls').isVisible(), "xls tile");
+  });
+
+  await check("'Download all' packs the course into one zip with an index", async () => {
+    const [dl] = await Promise.all([page.waitForEvent("download"), page.click('button:has-text("Download all")')]);
+    assert(dl.suggestedFilename() === "MARKETING MANAGEMENT.zip", `zip named ${dl.suggestedFilename()}`);
+    const files = unzip(readFileSync(await dl.path()));
+    const names = Object.keys(files).sort();
+    assert(names.join("|") === "General/E-BOOK-8000001.pdf|Week 1 — The marketing mix/E-BOOK-8000003.pdf|Week 1 — The marketing mix/Reading notes.md|index.md", `zip holds: ${names}`);
+    const notes = files["Week 1 — The marketing mix/Reading notes.md"].toString();
+    assert(/### The 4 Ps/.test(notes) && /- Pricing strategy/.test(notes), `page text:\n${notes}`);
+    assert(/Video: https:\/\/www\.youtube\.com\/watch\?v=qc7h69onKP0/.test(notes), "embedded lecture not linked");
+    assert(!/max-width/.test(notes), "page styles leaked into the notes");
+    assert(files["General/E-BOOK-8000001.pdf"].length === 1228604, "file truncated in the zip");
+    const index = files["index.md"].toString();
+    assert(/Assignment: \[Case study 1\]/.test(index) && /Week 1 — The marketing mix/.test(index), `index.md:
+${index}`);
+  });
+
+  await check("a unit downloads on its own", async () => {
+    await page.goto("https://lms.cuchd.in/course/view.php?id=125900");
+    await page.waitForSelector("#cs-sec-125833-1 .cs-unit-zip:not([hidden])", { timeout: 15000 });
+    const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#cs-sec-125833-1 .cs-unit-zip")]);
+    assert(dl.suggestedFilename() === "DECISION SCIENCE - Unit-1.zip", `zip named ${dl.suggestedFilename()}`);
+    const names = Object.keys(unzip(readFileSync(await dl.path())));
+    assert(names.length === 8, `unit zip holds: ${names}`);
+    assert(names.includes("Unit-1/Chapter 1.2/Topic 3.2.5 - Rights-based ethics; Challenges.pptx"), "Office original missing");
+    assert(names.includes("Unit-1/Chapter 1.2/Previous year papers/2024 End Sem.pdf"), "folder files missing");
+    assert(names.every((n) => n === "index.md" || n.startsWith("Unit-1/")), `unit zip holds: ${names}`);
+  });
+
+  await check("calendar shows the month, its events and an agenda", async () => {
+    await page.goto("https://lms.cuchd.in/my/");
+    await page.waitForSelector(".cs-course");
+    await page.click('.cs-menu a:has-text("Calendar")');
+    await page.waitForSelector(".cs-cal .cs-day:not(.pad)");
+    const now = new Date();
+    const days = await page.locator(".cs-cal .cs-day:not(.pad)").count();
+    assert(days === new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(), `${days} days in the grid`);
+    assert((await page.locator(".cs-cal .cs-day").count()) % 7 === 0, "grid not padded to whole weeks");
+    assert((await page.locator(".cs-ev").count()) === 4, "a day shows at most 3 events");
+    assert((await page.textContent(".cs-more")) === "+1 more", "overflow count");
+    assert((await page.locator(".cs-agenda .cs-row").count()) === 5, "agenda lists every event");
+    const title = await page.textContent("h1");
+    await shot("7-calendar");
+    await page.click('a[aria-label="Next month"]');
+    await page.waitForURL(/calendar\/view\.php\?view=month&time=\d+$/);
+    await page.waitForFunction((t) => document.querySelector("h1").textContent !== t, title);
+    await page.waitForSelector(".cs-agenda:not([hidden])");
+    await page.goBack();
+    await page.waitForFunction((t) => document.querySelector("h1").textContent === t, title);
   });
 
   await check("a course with no content says so", async () => {
@@ -277,8 +387,13 @@ try {
     assert(overflow <= 0, `horizontal overflow of ${overflow}px on a phone`);
     await shot("5-phone");
     await page.click('.cs-jump a:has-text("Unit-2")');
-    await page.waitForFunction(() => Math.abs(document.getElementById("cs-sec-5").getBoundingClientRect().top - (document.querySelector(".cs-jump").getBoundingClientRect().bottom + 16)) < 30, null, { timeout: 5000 });
+    await page.waitForFunction(() => Math.abs(document.getElementById("cs-sec-125833-5").getBoundingClientRect().top - (document.querySelector(".cs-jump").getBoundingClientRect().bottom + 16)) < 30, null, { timeout: 5000 });
     await page.screenshot({ path: join(OUT, "5-phone-jump.png") });
+    await page.goto("https://lms.cuchd.in/calendar/view.php?view=month");
+    await page.waitForSelector(".cs-agenda:not([hidden])");
+    const calOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert(calOverflow <= 0, `calendar overflows a phone by ${calOverflow}px`);
+    await shot("5-phone-calendar");
     await page.emulateMedia({ colorScheme: "dark" });
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("https://lms.cuchd.in/my/");

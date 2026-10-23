@@ -55,6 +55,11 @@ html.culms-simple {
   --accent: #1a56db;
   --accent-soft: #e8efff;
   --danger: #c5221f;
+  --danger-soft: #fdecea;
+  --ok: #1e7e34;
+  --ok-soft: #e6f4ea;
+  --warn: #9a5b00;
+  --warn-soft: #fff4e0;
   --skel: #eceff3;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
   color-scheme: light;
@@ -70,6 +75,11 @@ html.culms-simple {
     --accent: #7aa2ff;
     --accent-soft: #233158;
     --danger: #ff8a80;
+    --danger-soft: #3a2220;
+    --ok: #81c995;
+    --ok-soft: #1d3324;
+    --warn: #f6c26b;
+    --warn-soft: #3a2e17;
     --skel: #2a2e34;
     --shadow: none;
     color-scheme: dark;
@@ -231,8 +241,16 @@ html.culms-simple .cs-h2 {
   letter-spacing: 0.06em;
   color: var(--muted);
 }
-html.culms-simple .cs-upcoming .cs-h2 {
+html.culms-simple .cs-upcoming .cs-h2,
+html.culms-simple .cs-agenda .cs-h2 {
   margin: 0 0 8px;
+}
+html.culms-simple .cs-h2-link {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
 }
 html.culms-simple .cs-head {
   display: flex;
@@ -435,6 +453,15 @@ html.culms-simple .cs-unit-title {
   font-size: 18px;
   font-weight: 700;
 }
+html.culms-simple .cs-unit-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+html.culms-simple .cs-unit-side .cs-icon-btn {
+  width: 32px;
+  height: 32px;
+}
 html.culms-simple .cs-unit-count {
   font-size: 13px;
   font-weight: 500;
@@ -478,6 +505,27 @@ html.culms-simple .cs-jump a:hover {
 html.culms-simple .cs-jump + .cs-units {
   margin-top: 6px;
 }
+
+/* A subject shown as its content course and its class course. */
+html.culms-simple .cs-part-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 28px 0 0;
+}
+html.culms-simple .cs-part-head .cs-h2 {
+  margin: 0;
+}
+html.culms-simple .cs-part-orig {
+  margin-left: auto;
+  font-size: 13px;
+}
+html.culms-simple .cs-part-head + .cs-jump {
+  margin-top: 4px;
+}
+html.culms-simple .cs-part-head ~ .cs-units {
+  margin-top: 10px;
+}
 html.culms-simple .cs-chapter {
   margin-top: 12px;
   padding-top: 10px;
@@ -495,7 +543,7 @@ html.culms-simple .cs-chapter.is-empty {
 html.culms-simple.files-only .cs-chapter:has(.no-material) {
   display: none;
 }
-html.culms-simple.files-only .cs-item.is-activity,
+html.culms-simple.files-only .cs-units .cs-item.is-activity,
 html.culms-simple.files-only .cs-label {
   display: none;
 }
@@ -636,6 +684,177 @@ html.culms-simple .cs-results {
   padding: 8px 16px;
 }
 
+/* -------------------------------------------------------- assessments */
+
+html.culms-simple .cs-assess {
+  margin-top: 20px;
+}
+html.culms-simple .cs-assess > .cs-h2 {
+  margin: 0 0 4px;
+}
+html.culms-simple .cs-assess-sum {
+  display: inline-flex;
+  gap: 10px;
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+}
+html.culms-simple .cs-assess-group + .cs-assess-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+html.culms-simple .cs-assess-group h3 {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+html.culms-simple .cs-status {
+  flex: none;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--hover);
+  color: var(--muted);
+}
+html.culms-simple .cs-status.t-done {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+html.culms-simple .cs-status.t-todo {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+html.culms-simple .cs-status.t-late {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+html.culms-simple b.t-todo {
+  color: var(--warn);
+}
+html.culms-simple b.t-late {
+  color: var(--danger);
+}
+html.culms-simple .cs-assess-line {
+  display: block;
+}
+
+/* ----------------------------------------------------------- calendar */
+
+html.culms-simple .cs-cal {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--line);
+  box-shadow: var(--shadow);
+}
+html.culms-simple .cs-cal > .cs-skel {
+  grid-column: 1 / -1;
+  height: 420px;
+  border-radius: 0;
+}
+html.culms-simple .cs-cal > .cs-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 16px;
+  background: var(--card);
+}
+html.culms-simple .cs-dow {
+  padding: 8px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+html.culms-simple .cs-day {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  min-height: 104px;
+  padding: 6px;
+  background: var(--card);
+}
+html.culms-simple .cs-day.pad,
+html.culms-simple .cs-day.weekend {
+  background: var(--bg);
+}
+html.culms-simple .cs-mday {
+  align-self: flex-start;
+  min-width: 24px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+html.culms-simple a.cs-mday:hover {
+  background: var(--hover);
+  text-decoration: none;
+}
+html.culms-simple .cs-day.past .cs-mday {
+  color: var(--muted);
+  font-weight: 500;
+}
+html.culms-simple .cs-day.today .cs-mday {
+  background: var(--accent);
+  color: #fff;
+}
+html.culms-simple .cs-ev {
+  display: block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.culms-simple .cs-ev:hover {
+  text-decoration: none;
+  outline: 1px solid currentColor;
+}
+html.culms-simple .cs-ev.t-open {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+html.culms-simple .cs-ev.t-due,
+html.culms-simple .cs-ev.t-close {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+html.culms-simple .cs-day.past .cs-ev {
+  opacity: 0.6;
+}
+html.culms-simple .cs-more {
+  font-size: 12px;
+  color: var(--muted);
+}
+html.culms-simple .cs-agenda {
+  margin-top: 20px;
+}
+html.culms-simple .cs-row.past {
+  opacity: 0.6;
+}
+html.culms-simple .cs-agenda .cs-row {
+  scroll-margin-top: calc(var(--cs-top, 60px) + 16px);
+}
+
 /* ---------------------------------------------------- loading + toast */
 
 html.culms-simple .cs-skel {
@@ -725,5 +944,41 @@ html.culms-simple .cs-foot {
   }
   html.culms-simple .cs-folder {
     margin-left: 24px;
+  }
+  /* Day cells are too narrow for names on a phone: a dot per event, and the
+     list under the grid carries the details. */
+  html.culms-simple .cs-day {
+    min-height: 56px;
+    padding: 4px 2px;
+    flex-flow: row wrap;
+    align-content: flex-start;
+    justify-content: center;
+  }
+  html.culms-simple .cs-mday {
+    align-self: auto;
+    flex-basis: 100%;
+    padding: 1px 0;
+  }
+  html.culms-simple .cs-ev {
+    width: 7px;
+    height: 7px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 0;
+    background: currentColor;
+  }
+  html.culms-simple .cs-ev.t-open,
+  html.culms-simple .cs-ev.t-due,
+  html.culms-simple .cs-ev.t-close {
+    background: currentColor;
+  }
+  html.culms-simple .cs-more {
+    font-size: 10px;
+  }
+  html.culms-simple .cs-dow {
+    padding: 6px 2px;
+    font-size: 10px;
+    text-align: center;
+    letter-spacing: 0;
   }
 }
