@@ -1,0 +1,13 @@
+{
+  "name": "culms-simple",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension that turns lms.cuchd.in into a plain list of courses, units and files.",
+  "type": "module",
+  "scripts": {
+    "test": "node test/run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "CULMS Simple",
+  "version": "1.0.0",
+  "description": "Replaces the CU LMS dashboard and course pages with a plain list of your courses, units and files.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://lms.cuchd.in/*"],
+      "js": ["src/early.js"],
+      "css": ["src/simple.css"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://lms.cuchd.in/*"],
+      "js": ["src/parse.js", "src/lms.js", "src/app.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
