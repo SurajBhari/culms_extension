@@ -107,6 +107,13 @@ src/simple.css styles, all scoped so Moodle's own pages are left alone
 After editing, press the reload button on the extension's card in
 `chrome://extensions`, then reload the LMS tab.
 
+### Publishing
+
+`STORE.md` has the Chrome Web Store listing text and privacy answers.
+`npm run package` builds the upload, `dist/culms-simple.zip`, from the last
+commit, and `npm run store-images` renders the screenshots and promo tile into
+`store/` from the mock LMS.
+
 ### Tests
 
 ```bash

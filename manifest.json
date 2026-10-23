@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "CULMS Simple",
   "version": "1.0.0",
-  "description": "Replaces the CU LMS dashboard and course pages with a plain list of your courses, units and files.",
+  "description": "Unofficial. Shows the CU LMS (lms.cuchd.in) as a plain list of your courses, files, deadlines and a calendar.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

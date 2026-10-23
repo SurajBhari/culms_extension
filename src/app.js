@@ -1061,7 +1061,7 @@
           // The section name, unless it only repeats the kind or the name.
           rows.map((a) => itemRow(a.it, [kindLabel(a.it), a.it.name].includes(a.sec.name) ? "" : a.sec.name))
         );
-      })
+      }).filter(Boolean)
     );
   }
 
@@ -1428,7 +1428,7 @@
       ),
       indexed < courses.length
         ? h("p", { class: "cs-muted" }, `Searching ${indexed} of ${courses.length} courses — the rest have not been opened yet.`)
-        : null,
+        : "", // replaceChildren would print a null as "null"
       top.length
         ? h("div", { class: "cs-card cs-results" },
             top.map((r) =>

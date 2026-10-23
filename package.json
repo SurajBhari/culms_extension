@@ -5,7 +5,9 @@
   "description": "Chrome extension that turns lms.cuchd.in into a plain list of courses, units and files.",
   "type": "module",
   "scripts": {
-    "test": "node test/run.mjs"
+    "test": "node test/run.mjs",
+    "package": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && git archive --format=zip -o dist/culms-simple.zip HEAD manifest.json icons src",
+    "store-images": "node test/store.mjs"
   },
   "devDependencies": {
     "playwright": "^1.56.1"

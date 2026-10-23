@@ -272,6 +272,7 @@ try {
     const units = await page.locator(".cs-unit-title").evaluateAll((els) => els.map((e) => e.firstChild.textContent));
     assert(units.join("|") === "General|Week 1 — The marketing mix", `units: ${units}`);
     assert(await page.locator('.cs-item:has-text("Pricing worksheet") .k-xls').isVisible(), "xls tile");
+    assert(!/null/.test(await page.textContent(".cs-assess")), "an empty assessment group printed 'null'");
   });
 
   await check("'Download all' packs the course into one zip with an index", async () => {
@@ -345,6 +346,7 @@ ${index}`);
     const btn = page.locator('button:has-text("Search all")');
     if (await btn.count()) await btn.click();
     await page.waitForSelector('.cs-results .cs-item:has-text("Syllabus")', { timeout: 15000 });
+    assert(!/null/.test(await page.textContent("#cs-main")), "search page printed 'null'");
     await page.fill(".cs-search input", "");
   });
 
