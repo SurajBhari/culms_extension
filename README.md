@@ -46,6 +46,9 @@ and draws its own in its place.
   - **Files** open in a new tab. The download button goes past CU's Office
     viewer to the original `.pptx`/`.docx` and shows the file size.
   - **Folders** open in place to list their files.
+  - **Pages** and books have a download button too. It saves the text as
+    Markdown, or as a `.zip` with the handouts and images the page carries
+    when it has any, with the Markdown pointing at those copies.
   - **Links** go straight to the target. Forums, quizzes and assignments link to
     their Moodle page. Restricted items carry a lock.
   - **Material only** hides forums, quizzes and assignments, leaving files,
@@ -53,7 +56,7 @@ and draws its own in its place.
   - **Download all** packs every file in the course (both parts, folders
     included) into one `.zip`, with a directory per unit and chapter. Pages
     (CU's topic notes) and books go in as Markdown text, with their YouTube
-    lectures as links. Each
+    lectures as links and their attached files in a folder beside them. Each
     unit has its own download button too. The zip also holds an `index.md`
     listing the whole tree with its notes and links, which makes it easy to
     give the material to an AI tool as context.
@@ -113,6 +116,14 @@ After editing, press the reload button on the extension's card in
 `npm run package` builds the upload, `dist/culms-simple.zip`, from the last
 commit, and `npm run store-images` renders the screenshots and promo tile into
 `store/` from the mock LMS.
+
+Releases go out from GitHub Actions (`.github/workflows/publish.yml`): bump
+`version` in `manifest.json`, commit, and push a matching tag
+(`git tag v1.1.0 && git push origin v1.1.0`). The workflow runs the tests,
+builds the zip and submits it to the
+[store listing](https://chromewebstore.google.com/detail/culms-simple/bcpidjcmnlckebhmabcmilndbhphlgci)
+for review. It needs the `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET` and
+`CHROME_REFRESH_TOKEN` repository secrets (the same ones cleanchat uses).
 
 ### Tests
 

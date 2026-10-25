@@ -156,12 +156,15 @@ const ACTIVITY_PAGES = {
 };
 
 // A Page activity as CU writes them: notes, a scoped <style>, an embedded
-// YouTube lecture and reading links.
+// YouTube lecture, reading links, and a handout and a diagram uploaded into
+// the page itself.
 const PAGE = `<!DOCTYPE html><html><head><title>Page | CU-LMS</title></head><body><div role="main">
 <h2>Reading notes</h2><div class="box py-3 generalbox center clearfix"><div class="no-overflow">
 <style>.ailb-lp{max-width:100%}</style><div class="ailb-lp"><h3>The 4 Ps</h3><p>Product, price, place and promotion.</p>
 <ul><li>Product decisions</li><li>Pricing strategy</li></ul>
 <iframe src="https://www.youtube.com/embed/qc7h69onKP0"></iframe>
+<p><img src="https://lms.cuchd.in/pluginfile.php/4700001/mod_page/content/3/4ps.png" alt="The 4 Ps diagram"></p>
+<p>Handout: <a href="https://lms.cuchd.in/pluginfile.php/4700001/mod_page/content/3/Marketing%20mix%20handout.pdf">Marketing mix handout</a></p>
 <p>Further reading: <a href="https://openlibrary.org/search?q=marketing">Open Library</a></p></div></div></div></div></body></html>`;
 
 // core_calendar_get_calendar_monthly_view, shaped like the live answer:

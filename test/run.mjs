@@ -280,15 +280,26 @@ try {
     assert(dl.suggestedFilename() === "MARKETING MANAGEMENT.zip", `zip named ${dl.suggestedFilename()}`);
     const files = unzip(readFileSync(await dl.path()));
     const names = Object.keys(files).sort();
-    assert(names.join("|") === "General/E-BOOK-8000001.pdf|Week 1 — The marketing mix/E-BOOK-8000003.pdf|Week 1 — The marketing mix/Reading notes.md|index.md", `zip holds: ${names}`);
-    const notes = files["Week 1 — The marketing mix/Reading notes.md"].toString();
+    const wk = "Week 1 — The marketing mix";
+    assert(names.join("|") === `General/E-BOOK-8000001.pdf|${wk}/E-BOOK-8000003.pdf|${wk}/Reading notes.md|${wk}/Reading notes/4ps.png|${wk}/Reading notes/Marketing mix handout.pdf|index.md`, `zip holds: ${names}`);
+    const notes = files[`${wk}/Reading notes.md`].toString();
     assert(/### The 4 Ps/.test(notes) && /- Pricing strategy/.test(notes), `page text:\n${notes}`);
     assert(/Video: https:\/\/www\.youtube\.com\/watch\?v=qc7h69onKP0/.test(notes), "embedded lecture not linked");
     assert(!/max-width/.test(notes), "page styles leaked into the notes");
+    assert(notes.includes("![The 4 Ps diagram](<Reading notes/4ps.png>)"), `page image not pointed at its copy:\n${notes}`);
+    assert(notes.includes("[Marketing mix handout](<Reading notes/Marketing mix handout.pdf>)"), `handout not pointed at its copy:\n${notes}`);
+    assert(files[`${wk}/Reading notes/Marketing mix handout.pdf`].length === 1228604, "page attachment truncated");
     assert(files["General/E-BOOK-8000001.pdf"].length === 1228604, "file truncated in the zip");
     const index = files["index.md"].toString();
     assert(/Assignment: \[Case study 1\]/.test(index) && /Week 1 — The marketing mix/.test(index), `index.md:
 ${index}`);
+  });
+
+  await check("a Page downloads on its own, with its attachments", async () => {
+    const [dl] = await Promise.all([page.waitForEvent("download"), page.locator('.cs-units .cs-item:has-text("Reading notes") .cs-icon-btn').click()]);
+    assert(dl.suggestedFilename() === "Reading notes.zip", `page saved as ${dl.suggestedFilename()}`);
+    const names = Object.keys(unzip(readFileSync(await dl.path()))).sort();
+    assert(names.join("|") === "Reading notes.md|Reading notes/4ps.png|Reading notes/Marketing mix handout.pdf", `page zip holds: ${names}`);
   });
 
   await check("a unit downloads on its own", async () => {

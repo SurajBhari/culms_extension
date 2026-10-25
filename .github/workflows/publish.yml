@@ -1,0 +1,52 @@
+name: Publish to Chrome Web Store
+
+# Push a tag matching the manifest version (v1.1.0 for "version": "1.1.0") to
+# test, package and submit that commit for review.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the manifest
+        run: |
+          version=$(node -p "require('./manifest.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match manifest version $version"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Test
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm test
+
+      - name: Package
+        run: npm run package
+
+      # Secrets (Settings → Secrets and variables → Actions), the same as
+      # cleanchat's:
+      #   CHROME_CLIENT_ID      — OAuth2 client ID from Google Cloud Console
+      #   CHROME_CLIENT_SECRET  — OAuth2 client secret
+      #   CHROME_REFRESH_TOKEN  — refresh token for the Chrome Web Store API
+      - name: Publish to Chrome Web Store
+        uses: mnao305/chrome-extension-upload@224d037fac1b07a5f31c7aadb48e8ee061a2c568 # v4.0.1
+        with:
+          file-path: dist/culms-simple.zip
+          extension-id: bcpidjcmnlckebhmabcmilndbhphlgci
+          client-id: ${{ secrets.CHROME_CLIENT_ID }}
+          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}

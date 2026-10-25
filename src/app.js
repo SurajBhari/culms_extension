@@ -1015,7 +1015,7 @@
         const empty = done && secs.every((x) => x.classList.contains("is-empty"));
         const files = Array.from(card.querySelectorAll(".cs-item")).filter((x) => x.dataset.file).length;
         card.querySelector(".cs-unit-count").textContent = files ? `${files} file${files === 1 ? "" : "s"}` : "";
-        card.querySelector(".cs-unit-zip").hidden = !done || !card.querySelector(".cs-item[data-file], .cs-item-wrap");
+        card.querySelector(".cs-unit-zip").hidden = !done || !card.querySelector(".cs-item[data-file], .cs-item[data-text], .cs-item-wrap");
         let note = card.querySelector(":scope > .cs-empty");
         if (empty && !note) card.append(h("p", { class: "cs-empty" }, "Nothing has been posted here yet."));
         else if (!empty && note) note.remove();
@@ -1082,7 +1082,7 @@
     if (when) meta.append(` · ${when}`);
     if (it.restricted) meta.append(h("span", { class: "cs-lock" }, icon("lock"), "restricted"));
 
-    const row = h("div", { class: "cs-item" + (isMaterial(it) ? " is-material" : " is-activity"), "data-file": file ? "1" : null },
+    const row = h("div", { class: "cs-item" + (isMaterial(it) ? " is-material" : " is-activity"), "data-file": file ? "1" : null, "data-text": isText(it) ? "1" : null },
       kindTile(it),
       h("div", { class: "cs-item-main" },
         h("a", { class: "cs-name", href, target: file || it.modname === "url" ? "_blank" : null, rel: "noopener" }, it.name),
@@ -1092,6 +1092,9 @@
     if (it.modname === "quiz" || it.modname === "assign") row.append(statusChip(it));
     if (file) {
       const btn = h("button", { class: "cs-icon-btn", title: "Download", "aria-label": `Download ${it.name}`, onclick: () => download(it, btn, meta) }, icon("download"));
+      row.append(btn);
+    } else if (isText(it)) {
+      const btn = h("button", { class: "cs-icon-btn", title: "Download as Markdown, with its attachments", "aria-label": `Download ${it.name}`, onclick: () => downloadText(it, btn) }, icon("download"));
       row.append(btn);
     } else if (it.modname === "folder") {
       const list = h("div", { class: "cs-folder", hidden: !state.expanded.has(it.cmid) });
@@ -1116,6 +1119,22 @@
       root.append(a);
       a.click();
       a.remove();
+    } catch (err) {
+      if (!failed(err)) toast(`Could not download “${it.name}”: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("busy");
+    }
+  }
+
+  // One Page or Book: a .md file, or a .zip when its text carries files.
+  async function downloadText(it, btn) {
+    btn.disabled = true;
+    btn.classList.add("busy");
+    try {
+      const entries = await textEntries(it);
+      if (entries.length === 1) save(new Blob([entries[0].data], { type: "text/markdown" }), entries[0].path);
+      else save(zipBlob(entries), `${safeName(it.name)}.zip`);
     } catch (err) {
       if (!failed(err)) toast(`Could not download “${it.name}”: ${err.message}`);
     } finally {
@@ -1224,6 +1243,42 @@
 
   const safeName = (s) => s.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").replace(/[. ]+$/, "").trim().slice(0, 120) || "untitled";
 
+  function save(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = h("a", { href: url, download: filename, hidden: true });
+    root.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  // A Page or Book as Markdown, plus the files its text links to or embeds
+  // (handouts, images), in a folder named after it that the Markdown points
+  // into. A file that will not download keeps its LMS link instead.
+  async function textEntries(it) {
+    const doc = await state.lms.content(it);
+    const base = safeName(it.name);
+    const local = {};
+    const files = [];
+    const taken = new Set();
+    for (const f of P.contentFiles(doc)) {
+      let data;
+      try {
+        data = await state.lms.bytes(f.url);
+      } catch (err) {
+        if (err instanceof CULMS.SessionExpired) throw err;
+        continue;
+      }
+      let name = safeName(f.name);
+      for (let n = 2; taken.has(name.toLowerCase()); n++) name = safeName(f.name).replace(/(\.[^.]*)?$/, ` (${n})$1`);
+      taken.add(name.toLowerCase());
+      local[f.url] = `${base}/${name}`;
+      files.push({ path: local[f.url], data });
+    }
+    const md = new TextEncoder().encode(`# ${it.name}\n\n${P.contentMarkdown(doc, local)}`);
+    return [{ path: `${base}.md`, data: md }, ...files];
+  }
+
   // Every file under the given sections (folders included), packed into one
   // .zip with a directory per unit and chapter, plus an index.md of the whole
   // tree with its notes and links, so the lot can be handed to an AI as is.
@@ -1273,7 +1328,7 @@
       await pool(jobs, PARALLEL, async ({ dir, it }) => {
         try {
           if (isText(it)) {
-            add(`${dir}/${safeName(it.name)}.md`, new TextEncoder().encode(`# ${it.name}\n\n${await state.lms.content(it)}`));
+            for (const e of await textEntries(it)) add(`${dir}/${e.path}`, e.data);
           } else if (isFile(it)) {
             const f = state.resolved.get(it.cmid) || (await state.lms.resolveFile(it.cmid));
             state.resolved.set(it.cmid, f);
@@ -1291,12 +1346,7 @@
       });
       if (missed.length) index.push("## Not downloaded", "", ...missed.map((m) => `- ${m}`), "");
       add("index.md", new TextEncoder().encode(index.join("\n")));
-      const url = URL.createObjectURL(zipBlob(entries));
-      const a = h("a", { href: url, download: `${safeName(title)}.zip`, hidden: true });
-      root.append(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      save(zipBlob(entries), `${safeName(title)}.zip`);
       toast(`Saved ${entries.length - 1} files${missed.length ? `; ${missed.length} could not be fetched (listed in index.md)` : ""}.`);
     } catch (err) {
       if (!failed(err)) toast(`Could not download: ${err.message}`);

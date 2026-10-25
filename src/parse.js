@@ -254,13 +254,43 @@
     };
   }
 
+  const contentRoot = (doc) =>
+    doc.querySelector('[role="main"] .box.generalbox') || doc.querySelector('[role="main"]') || doc.body;
+
+  const PLUGINFILE = ["a[href", "img[src", "video[src", "audio[src", "source[src", "embed[src", "object[data"]
+    .map((x) => `${x}*="/pluginfile.php/"]`)
+    .join(", ");
+
+  // Files a Page or Book carries in its text: attachments it links to and
+  // images or media it embeds, all served from pluginfile.php.
+  function contentFiles(doc) {
+    const out = [];
+    const seen = new Set();
+    for (const el of contentRoot(doc).querySelectorAll(PLUGINFILE)) {
+      const url = new URL(el.getAttribute("href") || el.getAttribute("src") || el.getAttribute("data"), location.href).href.split("#")[0];
+      if (seen.has(url)) continue;
+      seen.add(url);
+      let name = new URL(url).pathname.split("/").pop();
+      try {
+        name = decodeURIComponent(name);
+      } catch {}
+      out.push({ name: name || "file", url });
+    }
+    return out;
+  }
+
   // The readable body of a Page activity or a book's print view, as Markdown,
   // so it can go into a zip next to the files. Embedded videos become links.
-  function contentMarkdown(doc) {
-    const root =
-      doc.querySelector('[role="main"] .box.generalbox') ||
-      doc.querySelector('[role="main"]') ||
-      doc.body;
+  // `local` maps a pluginfile URL to where its copy sits next to the Markdown.
+  function contentMarkdown(doc, local = {}) {
+    const root = contentRoot(doc);
+    const here = (raw) => {
+      try {
+        return local[new URL(raw, location.href).href.split("#")[0]];
+      } catch {
+        return undefined;
+      }
+    };
     const walk = (node) => {
       if (node.nodeType === 3) return node.textContent.replace(/\s+/g, " ");
       if (node.nodeType !== 1) return "";
@@ -273,14 +303,22 @@
       if (tag === "a") {
         const text = squash(inner());
         const href = node.href || "";
+        const copy = here(node.getAttribute("href") || "");
+        if (copy) return `[${text || copy}](<${copy}>)`;
         return /^https?:/.test(href) && text && text !== href ? `[${text}](${href})` : text || href;
       }
-      if (tag === "iframe" || tag === "video" || tag === "embed") {
-        const src = node.getAttribute("src") || (node.querySelector("source") || {}).src || "";
+      if (tag === "iframe" || tag === "video" || tag === "audio" || tag === "embed" || tag === "object") {
+        const src = node.getAttribute("src") || node.getAttribute("data") || (node.querySelector("source") || {}).src || "";
+        const copy = src && here(src);
+        if (copy) return `\n\n[${tag === "audio" ? "Audio" : tag === "video" ? "Video" : "File"}: ${copy}](<${copy}>)\n\n`;
         const yt = /youtube(?:-nocookie)?\.com\/embed\/([\w-]+)/.exec(src);
         return src ? `\n\nVideo: ${yt ? `https://www.youtube.com/watch?v=${yt[1]}` : src}\n\n` : "";
       }
-      if (tag === "img") return node.alt ? `[image: ${squash(node.alt)}]` : "";
+      if (tag === "img") {
+        const copy = here(node.getAttribute("src") || "");
+        if (copy) return `![${squash(node.alt)}](<${copy}>)`;
+        return node.alt ? `[image: ${squash(node.alt)}]` : "";
+      }
       if (tag === "tr") return `\n| ${Array.from(node.children, (c) => squash(walk(c))).join(" | ")} |`;
       if (/^(p|div|section|article|table|ul|ol|blockquote|pre|figure)$/.test(tag)) return `\n\n${inner()}\n\n`;
       return inner();
@@ -306,5 +344,5 @@
     return /\/login\/(index\.php)?/.test(new URL(url, location.href).pathname);
   }
 
-  CULMS.parse = { toDoc, config, userName, sections, activities, viewerDownloadUrl, folderFiles, isLoginPage, squash, assignStatus, quizStatus, contentMarkdown, moodleDate };
+  CULMS.parse = { toDoc, config, userName, sections, activities, viewerDownloadUrl, folderFiles, isLoginPage, squash, assignStatus, quizStatus, contentMarkdown, contentFiles, moodleDate };
 })();

@@ -128,11 +128,11 @@
       return it.modname === "quiz" ? P.quizStatus(doc) : P.assignStatus(doc);
     }
 
-    // A Page's text, or a whole Book through its print view, as Markdown.
+    // A Page, or a whole Book through its print view, for parse.contentMarkdown
+    // and parse.contentFiles.
     async content(it) {
       const url = it.modname === "book" ? `/mod/book/tool/print/index.php?id=${it.cmid}` : `/mod/${it.modname}/view.php?id=${it.cmid}`;
-      const { doc } = await page(url, `opening ${it.name}`);
-      return P.contentMarkdown(doc);
+      return (await page(url, `opening ${it.name}`)).doc;
     }
 
     async bytes(url) {
